@@ -2,7 +2,9 @@
 
 **Bring back Spotify's Daily Drive — your personal mix of podcasts and music, updated automatically.**
 
-Spotify killed the Daily Drive playlist feature. This project recreates it. It runs on any Linux machine (Raspberry Pi, Orange Pi, old laptop, cloud server) and automatically refreshes a Spotify playlist every morning with your favorite podcasts interleaved with music.
+Spotify [officially killed Daily Drive](https://community.spotify.com/t5/Music-Discussion/Is-Daily-Drive-gone/td-p/7377710) on March 17, 2026. This project recreates it. It runs on any Linux machine (Raspberry Pi, Orange Pi, old laptop, cloud server) and automatically refreshes a Spotify playlist every morning with your favorite podcasts interleaved with music.
+
+> **Important:** Spotify now requires a **Premium account** for Developer Mode apps and limits you to **5 authorized users** per app. This is fine for personal use — it's a free API, you just need Premium. See [Spotify's Feb 2026 changes](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide) for details.
 
 ---
 
@@ -47,7 +49,7 @@ You need to tell Spotify that your script is allowed to manage your playlists. T
 4. Fill in:
    - **App name:** Daily Drive
    - **App description:** Custom Daily Drive playlist
-   - **Redirect URI:** `http://localhost:8888/callback`
+   - **Redirect URI:** `http://127.0.0.1:8888/callback` (must be 127.0.0.1, NOT localhost)
    - Check the **Web API** box
 5. Click **Create**
 6. On the app page, click **Settings**
@@ -81,7 +83,11 @@ npm run setup
 
 This opens a browser window asking you to log into Spotify. After you approve, a token is saved locally. You only need to do this once.
 
-> **Headless server?** If your Pi doesn't have a browser, run `npm run setup` on your laptop first (clone the repo there, do the auth), then copy the `.spotify-token.json` file to your Pi.
+> **Headless server (no monitor)?** Two options:
+>
+> **Option A (easiest):** Clone the repo on your laptop, run `npm run setup` there, then copy `.spotify-token.json` and `config.yaml` to your Pi.
+>
+> **Option B (SSH tunnel):** From your laptop, SSH into your Pi with port forwarding: `ssh -L 8888:127.0.0.1:8888 user@your-pi-ip`, then run `npm run setup` on the Pi. The auth URL will work in your laptop's browser because port 8888 is tunneled.
 
 ### Step 7: Build Your Playlist!
 
@@ -205,9 +211,11 @@ This project uses the [Spotify Web API](https://developer.spotify.com/documentat
 
 ## Background: What Was Daily Drive?
 
-Spotify launched **Daily Drive** in June 2019 as a personalized playlist that mixed your favorite music with news and podcast episodes. It would update every morning and interleave short news clips, podcast episodes, and music tracks based on your listening habits.
+Spotify launched **Your Daily Drive** on June 12, 2019, as a personalized playlist that mixed your favorite music with news and podcast segments. It typically contained ~25 items: about 19 songs and 5-6 podcast/news clips, with short-form news (NPR, WSJ briefings) appearing first and longer podcasts placed deeper in the mix. It updated multiple times per day.
 
-Spotify discontinued the feature around 2023-2024, leaving many users without their favorite morning commute companion. This project brings it back — but better, because *you* control what goes in it.
+The feature expanded globally through 2021 (France, Spain, Italy, Japan, Philippines, etc.) but began degrading in late 2025 — playlists stopped updating, search couldn't find it. It was **fully removed on March 17, 2026**.
+
+This project brings it back — but better, because *you* control exactly what goes in it.
 
 ---
 

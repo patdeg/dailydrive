@@ -92,7 +92,8 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+// Bind to 127.0.0.1 explicitly (Spotify requires this, not "localhost")
+app.listen(port, "127.0.0.1", () => {
   const authUrl = spotifyApi.createAuthorizeURL(SCOPES, "dailydrive");
 
   console.log("\n🎵 Daily Drive — Setup\n");

@@ -114,9 +114,10 @@ schedule:
 - Paginate with offset (API returns max 50 per call)
 
 ### "Add support for Spotify recommendations"
-- Use `spotifyApi.getRecommendations()` with seed tracks/artists/genres
-- Add a `recommendations` section to config with seed parameters
-- Note: Some recommendation endpoints have been restricted by Spotify
+- **WARNING:** The `/v1/recommendations` endpoint was DEPRECATED in Nov 2024 and fully removed Feb 2026
+- Workaround: use `spotifyApi.getMyTopTracks()` and `spotifyApi.getMyRecentlyPlayedTracks()` as music sources
+- Or use search with the user's top artists to find similar music
+- `/artists/{id}/top-tracks` was also removed Feb 2026
 
 ### "Add multiple playlist targets"
 - Change `playlist_id` to an array of `playlists` in config
@@ -132,6 +133,17 @@ schedule:
 - Use `npm test` (runs `--dry-run`) to verify logic without modifying Spotify
 - The dry run prints the full playlist that would be created
 - No test framework is set up — add one if needed (Jest recommended)
+
+## Spotify API Restrictions (as of March 2026)
+
+- **Dev Mode requires Premium** and limits to **5 authorized users** per Client ID
+- `/v1/recommendations` endpoint — **REMOVED** (Nov 2024 deprecated, Feb 2026 removed)
+- `/artists/{id}/top-tracks` — **REMOVED** (Feb 2026)
+- Audio features (valence, energy, danceability) — **DEPRECATED** (Nov 2024)
+- Search results capped at 10 per query in Dev Mode
+- `http://localhost` redirect URIs — **NO LONGER ALLOWED** (Nov 2025), must use `http://127.0.0.1`
+- Implicit grant flow — **REMOVED** (Nov 2025)
+- For more: https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide
 
 ## Gotchas
 

@@ -12,7 +12,8 @@
 spotify:
   client_id: "your-client-id-here"
   client_secret: "your-client-secret-here"
-  redirect_uri: "http://localhost:8888/callback"
+  # IMPORTANT: Must use 127.0.0.1, NOT localhost (Spotify removed localhost support Nov 2025)
+  redirect_uri: "http://127.0.0.1:8888/callback"
 
 # --- Your Playlist ---
 # The playlist where Daily Drive content will be placed.
@@ -52,7 +53,8 @@ music:
     #   id: "another-playlist-id"
 
   # How many songs to include total
-  total_songs: 15
+  # (The original Daily Drive had ~19 songs and ~5 podcast segments)
+  total_songs: 19
 
   # Shuffle the songs? (true/false)
   shuffle: true
@@ -67,7 +69,7 @@ music:
 #   "PMMMM"    → 1 podcast, 4 songs, repeat...
 #   "PMMPMMM"  → 1 podcast, 2 songs, 1 podcast, 3 songs...
 #   "PM"       → alternating podcast and song
-mix_pattern: "PMMM"
+mix_pattern: "PMMMM"
 
 # --- Schedule ---
 # When to refresh (used by the systemd timer, not the script itself)
