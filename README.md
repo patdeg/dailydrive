@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="img/dailydrive.jpg" alt="My Daily Drive" width="300">
+</p>
+
 # Daily Drive
 
 **Bring back Spotify's Daily Drive — your personal mix of podcasts and music, updated automatically.**
