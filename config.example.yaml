@@ -9,6 +9,7 @@
 
 # --- Spotify App Credentials ---
 # Get these from https://developer.spotify.com/dashboard
+# IMPORTANT: Also add your Spotify email in Dashboard > User Management
 spotify:
   client_id: "your-client-id-here"
   client_secret: "your-client-secret-here"
@@ -26,39 +27,48 @@ playlist_id: "your-playlist-id-here"
 # Add your favorite podcasts here.
 # To find a show ID: open it in Spotify > Share > Copy link
 # Example: https://open.spotify.com/show/6z4NLXyHPga... → ID is "6z4NLXyHPga..."
+#
+# Use position: first to always place a podcast at the start of the playlist
+# (great for news briefings like NPR News Now)
 podcasts:
+  - name: "NPR News Now"
+    id: "6BRSvIBNQnB68GuoXJRCnQ"
+    episodes: 1
+    position: first         # Always plays first, before the mix pattern
+
   - name: "Freakonomics Radio"
     id: "6z4NLXyHPga1UmSJsPK7G1"
-    episodes: 1          # How many recent episodes to include
+    episodes: 1
 
   - name: "The Daily"
     id: "3IM0lmZxpFAY7CwMuv9H4g"
     episodes: 1
 
-  - name: "TED Radio Hour"
-    id: "3lMFGBKTvRl5cniJMYHIuV"
-    episodes: 1
-
 # --- Music Sources ---
-# Where to pull songs from. You can mix different sources.
+# Where to pull songs from. You can mix and match multiple sources.
+# All sources are pooled together, shuffled, and trimmed to total_songs.
 music:
-  # Pull songs from existing playlists
-  # Find playlist IDs the same way as your target playlist above
-  playlists:
-    - name: "Your Favorite Playlist"
-      id: "your-playlist-id"
-
-    # You can add multiple playlists
-    # - name: "Chill Vibes"
-    #   id: "another-playlist-id"
+  # Top tracks — pulls from your most-played songs
+  # Best signal for "songs I actually enjoy and don't skip"
+  top_tracks:
+    enabled: true
+    time_range: "short_term"   # short_term (~4 weeks), medium_term (~6 months), long_term (all time)
+    count: 30                  # fetch pool size (shuffled + trimmed to total_songs)
 
   # Genre-based music discovery (optional)
-  # Finds tracks by genre via Spotify search — great for a public "radio" feel
-  # without relying on any individual user's listening history.
+  # Finds fresh tracks by genre via Spotify search
   # genres:
-  #   - indie
   #   - pop
-  #   - electronic
+  #   - edm
+  #   - pop rock
+  #   - indie pop
+  #   - dance pop
+
+  # Pull songs from existing playlists (optional)
+  # Find playlist IDs the same way as your target playlist above
+  # playlists:
+  #   - name: "Your Favorite Playlist"
+  #     id: "your-playlist-id"
 
   # How many songs to include total
   # (The original Daily Drive had ~19 songs and ~5 podcast segments)
@@ -71,6 +81,7 @@ music:
 # Controls how podcasts and music are interleaved.
 # P = podcast episode, M = music track
 # The pattern repeats until all content is placed.
+# Pinned episodes (position: first) appear before the pattern starts.
 #
 # Examples:
 #   "PMMM"     → 1 podcast, 3 songs, 1 podcast, 3 songs...
@@ -81,7 +92,8 @@ mix_pattern: "PMMMM"
 
 # --- Schedule ---
 # When to refresh (used by the systemd timer, not the script itself)
-# Twice-daily updates: morning (04:00) catches overnight drops, evening (16:00) refreshes for commute
+# Twice-daily updates: morning catches overnight podcast drops,
+# evening refreshes for the commute home
 schedule:
   times:
     - "04:00"            # Morning: captures overnight podcast drops

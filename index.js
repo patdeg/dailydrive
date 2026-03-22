@@ -103,6 +103,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts) {
           name: episode.name,
           show: podcast.name,
           type: "episode",
+          position: podcast.position || null,
         });
         console.log(`    📌 ${episode.name}`);
       }
@@ -160,6 +161,40 @@ async function fetchMusicTracks(spotifyApi, musicConfig) {
           `    ⚠️  Failed to fetch playlist ${playlist.name}: ${err.message}`
         );
       }
+    }
+  }
+
+  // Fetch from user's top tracks
+  if (musicConfig.top_tracks && musicConfig.top_tracks.enabled) {
+    const timeRange = musicConfig.top_tracks.time_range || "short_term";
+    const count = musicConfig.top_tracks.count || 30;
+    console.log(`🎵 Fetching top tracks (${timeRange})...`);
+
+    try {
+      let offset = 0;
+      let remaining = count;
+
+      while (remaining > 0) {
+        const limit = Math.min(remaining, 50);
+        const data = await spotifyApi.getMyTopTracks({ limit, offset, time_range: timeRange });
+
+        for (const track of data.body.items) {
+          allTracks.push({
+            uri: track.uri,
+            name: track.name,
+            artist: track.artists?.map((a) => a.name).join(", ") || "Unknown",
+            type: "track",
+          });
+        }
+
+        if (data.body.items.length < limit) break;
+        offset += limit;
+        remaining -= limit;
+      }
+
+      console.log(`    Found ${allTracks.length} tracks from top tracks`);
+    } catch (err) {
+      console.error(`    ⚠️  Failed to fetch top tracks: ${err.message}`);
     }
   }
 
@@ -263,15 +298,32 @@ async function updatePlaylist(spotifyApi, playlistId, items) {
     return;
   }
 
-  // Spotify API allows max 100 items per call
-  // First, replace with the first batch
-  const firstBatch = uris.slice(0, 100);
-  await spotifyApi.replaceTracksInPlaylist(playlistId, firstBatch);
+  // Use /items endpoint (Spotify migrated from /tracks in Feb 2026)
+  const accessToken = spotifyApi.getAccessToken();
+
+  // Clear playlist first
+  const clearRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/items`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ uris: uris.slice(0, 100) }),
+  });
+  if (!clearRes.ok) {
+    const err = await clearRes.text();
+    throw new Error(`Failed to update playlist: ${clearRes.status} ${err}`);
+  }
 
   // Add remaining batches if any
   for (let i = 100; i < uris.length; i += 100) {
     const batch = uris.slice(i, i + 100);
-    await spotifyApi.addTracksToPlaylist(playlistId, batch);
+    const addRes = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/items`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ uris: batch }),
+    });
+    if (!addRes.ok) {
+      const err = await addRes.text();
+      throw new Error(`Failed to add batch: ${addRes.status} ${err}`);
+    }
   }
 
   console.log(`\n✅ Playlist updated with ${items.length} items!`);
@@ -321,16 +373,28 @@ async function main() {
     process.exit(0);
   }
 
-  // Fetch music from playlists and/or genre search
+  // Fetch music — split between familiar (top tracks/playlists) and discovery (genres)
   const musicConfig = config.music || {};
-  let tracks = await fetchMusicTracks(spotifyApi, musicConfig);
+  const totalSongs = musicConfig.total_songs || 15;
+  const hasGenres = musicConfig.genres && musicConfig.genres.length > 0;
 
-  // Genre-based discovery: supplement or replace playlist tracks
-  if (musicConfig.genres && musicConfig.genres.length > 0) {
-    const genreCount = musicConfig.genre_count || musicConfig.total_songs || 15;
-    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, genreCount);
-    tracks = shuffle([...tracks, ...genreTracks]).slice(0, musicConfig.total_songs || 15);
-    console.log(`🎵 Combined ${tracks.length} total songs (playlists + genre search)`);
+  // If genres are configured, split 50/50 between familiar and discovery
+  // Otherwise, all songs come from familiar sources
+  const familiarCount = hasGenres ? Math.ceil(totalSongs / 2) : totalSongs;
+  const discoveryCount = hasGenres ? totalSongs - familiarCount : 0;
+
+  // Fetch familiar tracks (top tracks + playlists)
+  const familiarConfig = { ...musicConfig, total_songs: familiarCount };
+  let tracks = await fetchMusicTracks(spotifyApi, familiarConfig);
+
+  // Fetch discovery tracks (genre search)
+  if (hasGenres && discoveryCount > 0) {
+    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, discoveryCount);
+    // Deduplicate: remove genre tracks that are already in familiar
+    const familiarUris = new Set(tracks.map((t) => t.uri));
+    const newGenreTracks = genreTracks.filter((t) => !familiarUris.has(t.uri));
+    tracks = [...tracks, ...newGenreTracks.slice(0, discoveryCount)];
+    console.log(`🎵 Music mix: ${familiarCount} familiar + ${newGenreTracks.slice(0, discoveryCount).length} discovery = ${tracks.length} total`);
   }
 
   if (episodes.length === 0 && tracks.length === 0) {
@@ -338,9 +402,20 @@ async function main() {
     process.exit(1);
   }
 
+  // Separate pinned episodes from the rest
+  const pinnedFirst = [];
+  const mixableEpisodes = [];
+  for (const ep of episodes) {
+    if (ep.position === "first") {
+      pinnedFirst.push(ep);
+    } else {
+      mixableEpisodes.push(ep);
+    }
+  }
+
   // Mix content according to pattern
   console.log(`\n🔀 Mixing with pattern: ${config.mix_pattern || "PMMM"}`);
-  const mixed = mixContent(episodes, tracks, config.mix_pattern);
+  const mixed = [...pinnedFirst, ...mixContent(mixableEpisodes, tracks, config.mix_pattern)];
 
   // Update the playlist
   await updatePlaylist(spotifyApi, config.playlist_id, mixed);

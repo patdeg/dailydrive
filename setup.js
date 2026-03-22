@@ -16,6 +16,12 @@ const express = require("express");
 const TOKEN_FILE = ".spotify-token.json";
 const CONFIG_FILE = "config.yaml";
 
+// --- Clear any existing token to force fresh auth ---
+if (fs.existsSync(TOKEN_FILE)) {
+  fs.unlinkSync(TOKEN_FILE);
+  console.log("🗑️  Deleted old token — starting fresh auth");
+}
+
 // --- Load config ---
 if (!fs.existsSync(CONFIG_FILE)) {
   console.error("\n❌ config.yaml not found!");
@@ -48,7 +54,9 @@ const SCOPES = [
   "playlist-modify-public",
   "playlist-modify-private",
   "playlist-read-private",
+  "playlist-read-collaborative",
   "user-library-read",
+  "user-read-private",
   "user-read-recently-played",
   "user-top-read",
 ];

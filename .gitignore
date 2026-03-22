@@ -1,6 +1,105 @@
-node_modules/
-.env
+# =============================================================================
+# .gitignore — Daily Drive (PUBLIC REPO)
+# =============================================================================
+# This repo is PUBLIC. Be paranoid about secrets.
+# When in doubt, add it here.
+# =============================================================================
+
+# --- Secrets & Credentials (CRITICAL) ---
+# Spotify OAuth tokens — contains access_token and refresh_token
 .spotify-token.json
+spotify-token.json
+*token*.json
+
+# User config — contains client_id, client_secret, playlist IDs
 config.yaml
+config.yml
+config.local.*
+
+# Environment files — may contain API keys
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+.env.development
+
+# Generic secrets patterns
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.csr
+*.jks
+*.keystore
+*.secret
+*.secrets
+*credentials*
+*secrets*
+!config.example.yaml
+
+# --- State & Runtime Data ---
 state.json
+*.state
+cursors.json
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm
+.yarn/
+.pnp.*
+
+# --- Logs ---
 *.log
+logs/
+
+# --- OS Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+.project
+.settings/
+*.code-workspace
+.history/
+
+# --- Temporary Files ---
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
+*.backup
+
+# --- Coverage & Build ---
+coverage/
+.nyc_output/
+dist/
+build/
+out/
+
+# --- Claude/AI assistant memory (may contain project context) ---
+.claude/
