@@ -96,6 +96,48 @@ function shuffle(array) {
 }
 
 /**
+ * Removes duplicate items from an array based on their URI.
+ * Keeps the first occurrence of each URI; subsequent occurrences are removed.
+ *
+ * This prevents the same song or episode from appearing multiple times in the
+ * playlist when it's fetched from different sources (e.g., top tracks + playlists,
+ * or familiar music + genre discovery).
+ *
+ * @param {Array} items - Array of objects with a `uri` property
+ * @param {string} label - Optional label for logging (e.g., "tracks", "episodes")
+ * @returns {Array} - Deduplicated array with logging output
+ */
+function removeDuplicates(items, label = "items") {
+  const seen = new Set();
+  const deduplicated = [];
+  let duplicateCount = 0;
+
+  for (const item of items) {
+    if (!item.uri) {
+      // Items without URI are kept (shouldn't happen, but be safe)
+      deduplicated.push(item);
+      continue;
+    }
+
+    if (seen.has(item.uri)) {
+      duplicateCount++;
+      console.log(
+        `    ⏭️  Skipping duplicate: ${item.name} (${item.type === "episode" ? item.show : item.artist})`
+      );
+    } else {
+      seen.add(item.uri);
+      deduplicated.push(item);
+    }
+  }
+
+  if (duplicateCount > 0) {
+    console.log(`    🔄 Removed ${duplicateCount} duplicate ${label}`);
+  }
+
+  return deduplicated;
+}
+
+/**
  * Spotify access tokens expire after 1 hour. This function checks if the token
  * is about to expire (within 5 minutes) and refreshes it automatically using
  * the long-lived refresh token. You don't need to re-authenticate manually.
@@ -133,7 +175,7 @@ async function refreshTokenIfNeeded(spotifyApi, token) {
  * quickly on Spotify. If you see "[unavailable]" in your playlist, run the
  * script again to fetch the latest episode.
  */
-async function fetchPodcastEpisodes(spotifyApi, podcasts) {
+async function fetchPodcastEpisodes(spotifyApi, podcasts, market) {
   const episodes = [];
 
   for (const podcast of podcasts) {
@@ -145,7 +187,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts) {
       // Ask Spotify for the most recent episodes of this show
       const data = await spotifyApi.getShowEpisodes(podcast.id, {
         limit: count,
-        market: "US", // Required for episode availability
+        market: market || "US", // Use configured market or default to US
       });
 
       for (const episode of data.body.items) {
@@ -174,7 +216,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts) {
  *
  * Tracks are shuffled and trimmed to the requested count.
  */
-async function fetchMusicTracks(spotifyApi, musicConfig) {
+async function fetchMusicTracks(spotifyApi, musicConfig, market) {
   let allTracks = [];
 
   // --- Source 1: Pull tracks from user-specified playlists ---
@@ -276,6 +318,9 @@ async function fetchMusicTracks(spotifyApi, musicConfig) {
     }
   }
 
+  // Remove duplicate tracks before shuffling and trimming
+  allTracks = removeDuplicates(allTracks, "tracks");
+
   // Shuffle and trim to the desired total number of songs
   const totalSongs = musicConfig.total_songs || 15;
   if (musicConfig.shuffle !== false) {
@@ -294,7 +339,7 @@ async function fetchMusicTracks(spotifyApi, musicConfig) {
  *
  * Tracks are split evenly across genres, then shuffled and trimmed.
  */
-async function fetchGenreTracks(spotifyApi, genres, count) {
+async function fetchGenreTracks(spotifyApi, genres, count, market) {
   const tracks = [];
   // Divide the target count evenly among configured genres
   const perGenre = Math.ceil(count / genres.length);
@@ -305,7 +350,7 @@ async function fetchGenreTracks(spotifyApi, genres, count) {
       // Use Spotify's search with a "genre:" filter
       const data = await spotifyApi.searchTracks(`genre:${genre}`, {
         limit: Math.min(perGenre, 10), // Spotify Dev Mode caps search at 10 results per query
-        market: "US",
+        market: market || "US", // Use configured market or default to US
       });
 
       for (const track of data.body.tracks.items) {
@@ -473,7 +518,7 @@ async function main() {
   }
 
   // Step 5: Fetch the latest podcast episodes
-  const episodes = await fetchPodcastEpisodes(spotifyApi, config.podcasts || []);
+  const episodes = await fetchPodcastEpisodes(spotifyApi, config.podcasts || [], config.spotify.market);
 
   // Step 6: Check if episodes have changed since last run
   // This prevents unnecessary playlist updates that would reset your listening position
@@ -532,10 +577,14 @@ async function main() {
   console.log(`\n🔀 Mixing with pattern: ${config.mix_pattern || "PMMM"}`);
   const mixed = [...pinnedFirst, ...mixContent(mixableEpisodes, tracks, config.mix_pattern)];
 
-  // Step 10: Push the final mixed playlist to Spotify
-  await updatePlaylist(spotifyApi, config.playlist_id, mixed);
+  // Step 9a: Final deduplication pass (safety net)
+  // This catches any duplicates that might have appeared during mixing
+  const finalMixed = removeDuplicates(mixed, "playlist items");
 
-  // Step 11: Save state so the next run can detect if episodes have changed
+  // Step 10: Push the final mixed playlist to Spotify
+  await updatePlaylist(spotifyApi, config.playlist_id, finalMixed);
+
+  // Step 11: Save state with detailed item metadata for debugging
   if (!DRY_RUN) {
     const newState = {
       episode_uris: currentEpisodeUris,
@@ -564,6 +613,7 @@ async function main() {
  */
 async function fetchAllMusicTracks(spotifyApi, config) {
   const musicConfig = config.music || {};
+  const market = config.spotify?.market || "US";
   const totalSongs = musicConfig.total_songs || 15;
   const hasGenres = musicConfig.genres && musicConfig.genres.length > 0;
 
@@ -575,17 +625,24 @@ async function fetchAllMusicTracks(spotifyApi, config) {
 
   // Fetch familiar tracks (your top tracks + any source playlists)
   const familiarConfig = { ...musicConfig, total_songs: familiarCount };
-  let tracks = await fetchMusicTracks(spotifyApi, familiarConfig);
+  let tracks = await fetchMusicTracks(spotifyApi, familiarConfig, market);
 
   // Fetch discovery tracks (genre-based search for new music)
   if (hasGenres && discoveryCount > 0) {
-    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, discoveryCount);
+    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, discoveryCount, market);
 
     // Remove any genre tracks that duplicate songs already in the familiar set
     const familiarUris = new Set(tracks.map((t) => t.uri));
-    const newGenreTracks = genreTracks.filter((t) => !familiarUris.has(t.uri));
-    tracks = [...tracks, ...newGenreTracks.slice(0, discoveryCount)];
-    console.log(`🎵 Music mix: ${familiarCount} familiar + ${newGenreTracks.slice(0, discoveryCount).length} discovery = ${tracks.length} total`);
+    const uniqueGenreTracks = genreTracks.filter((t) => !familiarUris.has(t.uri));
+    
+    // Log deduplication result
+    if (uniqueGenreTracks.length < genreTracks.length) {
+      const deduped = genreTracks.length - uniqueGenreTracks.length;
+      console.log(`    🔄 Removed ${deduped} duplicate genre track(s) already in familiar music`);
+    }
+    
+    tracks = [...tracks, ...uniqueGenreTracks.slice(0, discoveryCount)];
+    console.log(`🎵 Music mix: ${familiarCount} familiar + ${uniqueGenreTracks.slice(0, discoveryCount).length} discovery = ${tracks.length} total`);
   }
 
   return tracks;
