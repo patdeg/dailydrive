@@ -434,7 +434,7 @@ function mixContent(episodes, tracks, pattern) {
  * PUT replaces the first 100 items; POST appends additional batches if needed.
  * This endpoint accepts both track and episode URIs.
  */
-async function updatePlaylist(spotifyApi, playlistId, items) {
+async function updatePlaylist(spotifyApi, playlistId, items, mode) {
   const uris = items.map((item) => item.uri);
 
   // In dry-run mode, just print what would happen and return
@@ -481,8 +481,38 @@ async function updatePlaylist(spotifyApi, playlistId, items) {
   }
 
   console.log(`\n✅ Playlist updated with ${items.length} items!`);
-  console.log(`   🎙️  ${items.filter((i) => i.type === "episode").length} podcast episodes`);
-  console.log(`   🎵 ${items.filter((i) => i.type === "track").length} songs\n`);
+  const episodeCount = items.filter((i) => i.type === "episode").length;
+  const trackCount = items.filter((i) => i.type === "track").length;
+  console.log(`   🎙️  ${episodeCount} podcast episodes`);
+  console.log(`   🎵 ${trackCount} songs\n`);
+
+  const now = new Date();
+  const updatedAt = now.toISOString().replace("T", " ").split(".")[0] + " UTC";
+  const modeLabel = mode === "podcast-only" ? "hourly podcast refresh" : "full refresh";
+  const description = `Daily Drive updated: ${trackCount} songs, ${episodeCount} episodes, ${modeLabel}. Last updated ${updatedAt}.`;
+
+  await setPlaylistDescription(spotifyApi, playlistId, description);
+  console.log("📝 Playlist description updated.");
+}
+
+/**
+ * Updates the Spotify playlist description with a short debug summary.
+ */
+async function setPlaylistDescription(spotifyApi, playlistId, description) {
+  const accessToken = spotifyApi.getAccessToken();
+  const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ description }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Failed to update playlist description: ${res.status} ${err}`);
+  }
 }
 
 // =============================================================================
@@ -491,7 +521,9 @@ async function updatePlaylist(spotifyApi, playlistId, items) {
 
 async function main() {
   const mode = PODCAST_ONLY ? "podcast-only" : "full";
-  console.log(`\n🚗 Daily Drive — ${PODCAST_ONLY ? "Hourly podcast refresh" : "Full playlist rebuild"}...\n`);
+  const runTime = new Date().toISOString().replace("T", " ").split(".")[0] + " UTC";
+  console.log(`\n🚗 Daily Drive — ${PODCAST_ONLY ? "Hourly podcast refresh" : "Full playlist rebuild"}...`);
+  console.log(`   🕒 Run started: ${runTime}\n`);
 
   // Step 1: Load configuration and authentication token
   const config = loadConfig();
@@ -582,7 +614,7 @@ async function main() {
   const finalMixed = removeDuplicates(mixed, "playlist items");
 
   // Step 10: Push the final mixed playlist to Spotify
-  await updatePlaylist(spotifyApi, config.playlist_id, finalMixed);
+  await updatePlaylist(spotifyApi, config.playlist_id, finalMixed, mode);
 
   // Step 11: Save state with detailed item metadata for debugging
   if (!DRY_RUN) {
