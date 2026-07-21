@@ -113,19 +113,21 @@ function removeDuplicates(items, label = "items") {
   let duplicateCount = 0;
 
   for (const item of items) {
-    if (!item.uri) {
-      // Items without URI are kept (shouldn't happen, but be safe)
+    const dedupeKey = item.type === "track" && item.isrc ? item.isrc : item.uri;
+
+    if (!dedupeKey) {
+      // Items without a usable dedupe key are kept (shouldn't happen, but be safe)
       deduplicated.push(item);
       continue;
     }
 
-    if (seen.has(item.uri)) {
+    if (seen.has(dedupeKey)) {
       duplicateCount++;
       console.log(
         `    ⏭️  Skipping duplicate: ${item.name} (${item.type === "episode" ? item.show : item.artist})`
       );
     } else {
-      seen.add(item.uri);
+      seen.add(dedupeKey);
       deduplicated.push(item);
     }
   }
