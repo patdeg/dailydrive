@@ -38,7 +38,7 @@ const CONFIG_FILE = "config.yaml";
 // Google Gemini API — OpenAI-compatible endpoint
 const GEMINI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.5-flash";
 
 // Load .env manually (no dotenv dependency)
 if (fs.existsSync(".env")) {

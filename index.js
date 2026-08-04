@@ -126,40 +126,111 @@ async function refreshTokenIfNeeded(spotifyApi, token) {
 // =============================================================================
 
 /**
- * Fetches the latest episodes for each podcast listed in your config.
- * Returns an array of episode objects with uri, name, show name, and position.
+ * Fetches podcast episodes based on the configured mode per podcast:
+ *   - "newest" (default): grabs the most recent episode(s)
+ *   - "oldest_unplayed": scans recent episodes and picks the oldest one
+ *     that Spotify hasn't marked as fully played yet
  *
- * Note: Some podcasts (like NPR News Now) publish hourly episodes that expire
- * quickly on Spotify. If you see "[unavailable]" in your playlist, run the
- * script again to fetch the latest episode.
+ * The "oldest_unplayed" mode uses Spotify's resume_point.fully_played field,
+ * which is returned when the market parameter is set. It scans up to
+ * scan_limit episodes (default: 50) and picks from the bottom (oldest first).
+ *
+ * Falls back to newest if no unplayed episodes are found.
  */
 async function fetchPodcastEpisodes(spotifyApi, podcasts) {
   const episodes = [];
 
   for (const podcast of podcasts) {
-    // How many recent episodes to grab (default: 1, configurable per podcast)
     const count = podcast.episodes || 1;
-    console.log(`🎙️  Fetching ${count} episode(s) from: ${podcast.name}`);
+    const mode = podcast.mode || "newest";
+
+    console.log(`🎙️  Fetching ${count} episode(s) from: ${podcast.name} (mode: ${mode})`);
 
     try {
-      // Ask Spotify for the most recent episodes of this show
-      const data = await spotifyApi.getShowEpisodes(podcast.id, {
-        limit: count,
-        market: "US", // Required for episode availability
-      });
+      if (mode === "oldest_unplayed") {
+        // Scan through episodes in batches of 50 (Spotify API max per request)
+        const scanLimit = podcast.scan_limit || 50;
+        const batchSize = 50;
+        let offset = 0;
+        let scanned = 0;
+        const unplayed = [];
 
-      for (const episode of data.body.items) {
-        episodes.push({
-          uri: episode.uri,      // Spotify URI like "spotify:episode:abc123"
-          name: episode.name,
-          show: podcast.name,
-          type: "episode",
-          position: podcast.position || null, // "first" = pinned to top of playlist
+        while (scanned < scanLimit) {
+          const limit = Math.min(batchSize, scanLimit - scanned);
+          const data = await spotifyApi.getShowEpisodes(podcast.id, {
+            limit,
+            offset,
+            market: "US",
+          });
+
+          const items = data.body.items;
+          if (items.length === 0) break; // No more episodes
+
+          for (const ep of items) {
+            const status = ep.resume_point?.fully_played ? "✅ played" : "⬜ unplayed";
+            console.log(`    ${status}  ${ep.name}`);
+
+            if (!ep.resume_point?.fully_played) {
+              unplayed.push(ep);
+            }
+          }
+
+          scanned += items.length;
+          offset += items.length;
+
+          // If we got fewer than requested, we've reached the end
+          if (items.length < limit) break;
+
+          console.log(`    📊 Scanned ${scanned}/${scanLimit} episodes, ${unplayed.length} unplayed so far...`);
+        }
+
+        console.log(`    📊 Scan complete: ${scanned} episodes scanned, ${unplayed.length} unplayed found`);
+
+        // Reverse so oldest unplayed comes first
+        unplayed.reverse();
+
+        let selected;
+        if (unplayed.length === 0) {
+          console.log(`    ℹ️  No unplayed episodes found — falling back to newest`);
+          // Fallback: grab newest (re-fetch first batch)
+          const fallback = await spotifyApi.getShowEpisodes(podcast.id, {
+            limit: count,
+            market: "US",
+          });
+          selected = fallback.body.items;
+        } else {
+          selected = unplayed.slice(0, count);
+        }
+
+        for (const episode of selected) {
+          episodes.push({
+            uri: episode.uri,
+            name: episode.name,
+            show: podcast.name,
+            type: "episode",
+            position: podcast.position || null,
+          });
+          console.log(`    📌 Selected: ${episode.name}`);
+        }
+      } else {
+        // Default "newest" mode — original behavior
+        const data = await spotifyApi.getShowEpisodes(podcast.id, {
+          limit: count,
+          market: "US",
         });
-        console.log(`    📌 ${episode.name}`);
+
+        for (const episode of data.body.items) {
+          episodes.push({
+            uri: episode.uri,
+            name: episode.name,
+            show: podcast.name,
+            type: "episode",
+            position: podcast.position || null,
+          });
+          console.log(`    📌 ${episode.name}`);
+        }
       }
     } catch (err) {
-      // Don't crash if one podcast fails — just warn and continue with the rest
       console.error(`    ⚠️  Failed to fetch ${podcast.name}: ${err.message}`);
     }
   }

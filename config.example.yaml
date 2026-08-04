@@ -43,14 +43,18 @@ podcasts:
     id: "6BRSvIBNQnB68GuoXJRCnQ"
     episodes: 1
     position: first         # Always plays first, before the mix pattern
+    mode: "newest"          # Always plays the latest episode
 
   - name: "Freakonomics Radio"
     id: "6z4NLXyHPga1UmSJsPK7G1"
     episodes: 1
+    mode: "oldest_unplayed"     # Plays the oldest unplayed (unfinished) episode
+    scan_limit: 50              # How many episodes should be scanned (Standard: 50)
 
   - name: "The Daily"
     id: "3IM0lmZxpFAY7CwMuv9H4g"
     episodes: 1
+    mode: "newest"
 
 # --- Music Sources ---
 # Where to pull songs from. You can mix and match multiple sources.
