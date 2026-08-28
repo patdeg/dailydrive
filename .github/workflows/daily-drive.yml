@@ -1,0 +1,117 @@
+name: Daily Drive
+
+on:
+  # Manual trigger — inputs override repository variables for one-off runs.
+  # For persistent config, set PODCAST_IDS and SOURCE_PLAYLIST_ID as
+  # repository variables: Settings → Secrets and variables → Variables.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - podcast-only
+          - dry-run
+      podcast_ids:
+        description: 'Podcast show IDs, comma-separated (overrides PODCAST_IDS variable)'
+        required: false
+      source_playlist_id:
+        description: 'Playlist ID to pull songs from (overrides SOURCE_PLAYLIST_ID variable)'
+        required: false
+
+  # Scheduled runs (Monday–Friday only). GitHub Actions cron runs in UTC.
+  # These are set to EST (UTC-5). During EDT (UTC-4, roughly Mar–Nov),
+  # runs will fire at 6:30 AM and 4:30 PM ET instead — still reasonable.
+  schedule:
+    - cron: '30 10 * * 1-5'  # 5:30 AM EST / 6:30 AM EDT — morning commute
+    - cron: '30 20 * * 1-5'  # 3:30 PM EST / 4:30 PM EDT — afternoon commute
+
+jobs:
+  update-playlist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      # Builds config.yaml from secrets + PODCAST_IDS/SOURCE_PLAYLIST_ID.
+      # For scheduled runs, set PODCAST_IDS and SOURCE_PLAYLIST_ID as repository variables.
+      # For manual runs, the workflow_dispatch inputs above override those variables.
+      - name: Write config.yaml
+        env:
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_PLAYLIST_ID: ${{ secrets.SPOTIFY_PLAYLIST_ID }}
+          PODCAST_IDS: ${{ github.event.inputs.podcast_ids || vars.PODCAST_IDS }}
+          SOURCE_PLAYLIST_ID: ${{ github.event.inputs.source_playlist_id || vars.SOURCE_PLAYLIST_ID }}
+        run: |
+          node - <<'EOF'
+          const yaml = require('js-yaml');
+          const fs   = require('fs');
+
+          const podcastIds   = (process.env.PODCAST_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+          const sourcePlId   = (process.env.SOURCE_PLAYLIST_ID || '').trim();
+
+          const config = {
+            spotify: {
+              client_id:    process.env.SPOTIFY_CLIENT_ID,
+              client_secret: process.env.SPOTIFY_CLIENT_SECRET,
+              redirect_uri: 'http://127.0.0.1:8888/callback',
+            },
+            playlist_id: process.env.SPOTIFY_PLAYLIST_ID,
+            podcasts: podcastIds.map(id => ({ name: id, id, episodes: 1 })),
+            music: {
+              top_tracks: { enabled: true, time_range: 'short_term', count: 30 },
+              ...(sourcePlId ? { playlists: [{ name: 'Source Playlist', id: sourcePlId }] } : {}),
+              total_songs: 19,
+              shuffle: true,
+            },
+            mix_pattern: 'PMMMM',
+          };
+
+          fs.writeFileSync('config.yaml', yaml.dump(config));
+          console.log(`config.yaml written — ${podcastIds.length} podcast(s)${sourcePlId ? ', 1 source playlist' : ''}`);
+          EOF
+
+      # Writes the token file using your stored refresh token.
+      # expires_at is set to 0 so index.js always refreshes the access token on startup.
+      - name: Write Spotify token
+        env:
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
+        run: |
+          printf '{\n  "access_token": "",\n  "refresh_token": "%s",\n  "expires_at": 0\n}\n' \
+            "$SPOTIFY_REFRESH_TOKEN" > .spotify-token.json
+
+      - name: Run Daily Drive
+        run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          case "$MODE" in
+            podcast-only) node index.js --podcast-only ;;
+            dry-run)      node index.js --dry-run ;;
+            *)            npm start ;;
+          esac
+
+      # Optional: write the (possibly rotated) refresh token back to GitHub Secrets.
+      # Requires a Personal Access Token with `secrets:write` scope stored as GH_PAT.
+      # If GH_PAT is not set, this step is skipped silently.
+      - name: Persist refresh token if rotated
+        if: success() && github.event.inputs.mode != 'dry-run'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT not configured — skipping refresh token update (token rotation will not be persisted)"
+            exit 0
+          fi
+          NEW_TOKEN=$(node -p "require('./.spotify-token.json').refresh_token")
+          gh secret set SPOTIFY_REFRESH_TOKEN --body "$NEW_TOKEN"
+          echo "Refresh token updated."
