@@ -204,7 +204,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts, market) {
           const data = await spotifyApi.getShowEpisodes(podcast.id, {
             limit,
             offset,
-            market: "US",
+            market: market || "US",
           });
 
           const items = data.body.items;
@@ -239,7 +239,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts, market) {
           // Fallback: grab newest (re-fetch first batch)
           const fallback = await spotifyApi.getShowEpisodes(podcast.id, {
             limit: count,
-            market: "US",
+            market: market || "US",
           });
           selected = fallback.body.items;
         } else {
@@ -260,7 +260,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts, market) {
         // Default "newest" mode — original behavior
         const data = await spotifyApi.getShowEpisodes(podcast.id, {
           limit: count,
-          market: "US",
+          market: market || "US",
         });
 
         for (const episode of data.body.items) {
