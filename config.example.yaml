@@ -54,8 +54,8 @@ podcasts:
   - name: "Freakonomics Radio"
     id: "6z4NLXyHPga1UmSJsPK7G1"
     episodes: 1
-    mode: "oldest_unplayed"     # Plays the oldest unplayed (unfinished) episode
-    scan_limit: 50              # How many episodes should be scanned (Standard: 50)
+    mode: "oldest_unplayed"     # newest, newest_unplayed, or oldest_unplayed
+    scan_limit: 50              # Max episodes to scan; newest_unplayed stops sooner when possible
 
   - name: "The Daily"
     id: "3IM0lmZxpFAY7CwMuv9H4g"
