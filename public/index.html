@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Daily Drive</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101312;
+      --panel: #171d1a;
+      --card: #202823;
+      --line: #344038;
+      --text: #f0f4ef;
+      --muted: #a6b2a8;
+      --accent: #1db954;
+      --accent-soft: #b6e8b9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0 auto;
+      max-width: 1500px;
+      padding: clamp(1rem, 3vw, 2.5rem);
+      font: 15px/1.4 ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+    h1 { font-size: clamp(1.5rem, 2vw, 2rem); margin: 0 0 0.25rem; letter-spacing: 0; }
+    h2 { font-size: 1.05rem; margin: 0 0 0.8rem; }
+    p.sub { color: var(--muted); margin: 0; }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .actions { justify-content: end; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr); gap: 1rem; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; min-width: 0; }
+    .panel.playlist { order: 1; }
+    .panel.music { order: 2; }
+    .panel.podcasts { order: 3; }
+    .podcast {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    label { display: block; font-size: 0.75rem; color: var(--muted); margin-top: 0.4rem; }
+    input, select, button {
+      font: inherit;
+      color: var(--text);
+      background: #101411;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+    }
+    input[type="text"], select { width: 100%; }
+    input[type="number"] { width: 5rem; }
+    button { cursor: pointer; }
+    button.primary { background: var(--accent); color: #08100a; border: 0; font-weight: 700; }
+    button.secondary { color: var(--accent-soft); border-color: #397344; }
+    button:disabled { cursor: wait; opacity: 0.6; }
+    button.danger { background: transparent; color: #f66; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      margin: 0 0.35rem 0.35rem 0;
+    }
+    .chip button { border: 0; background: none; padding: 0; color: var(--muted); }
+    .status { min-height: 1.3rem; color: var(--muted); margin: 0.5rem 0; }
+    .status.err { color: #f66; }
+    .item {
+      display: grid;
+      grid-template-columns: 64px 1fr auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .item img, .ph {
+      width: 64px;
+      height: 64px;
+      border-radius: 4px;
+      object-fit: cover;
+      background: #2a2a2a;
+    }
+    .item .name { font-weight: 600; }
+    .item .sub { color: var(--muted); font-size: 0.85rem; }
+    .badge {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .node-log { margin-top: 1.25rem; }
+    .node-log pre {
+      max-height: 260px;
+      min-height: 100px;
+      overflow: auto;
+      margin: 0;
+      padding: 0.75rem;
+      color: var(--accent-soft);
+      background: #0b0f0c;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: 0.75rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 1050px) { .layout { grid-template-columns: 1fr 1fr; } .panel.playlist { order: 3; grid-column: 1 / -1; } }
+    @media (max-width: 680px) {
+      header { align-items: start; flex-direction: column; }
+      .actions { justify-content: start; }
+      .layout { grid-template-columns: 1fr; }
+      .panel.playlist { grid-column: auto; }
+    }
+    @media (max-width: 520px) { .fields { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Daily Drive</h1>
+      <p class="sub">Tune the mix, preview it, or send a fresh build to Spotify.</p>
+    </div>
+    <div class="row actions">
+      <button class="secondary" id="gemini-refresh">Refresh with Gemini</button>
+      <button class="primary" id="dry-run">Dry run</button>
+      <button class="primary" id="refresh">Refresh playlist</button>
+      <button id="save">Save settings</button>
+    </div>
+  </header>
+  <p class="status" id="status"></p>
+
+  <main class="layout">
+    <section class="panel playlist">
+      <h2>Playlist</h2>
+      <div id="playlist"></div>
+    </section>
+
+    <section class="panel music">
+      <h2>Music settings</h2>
+      <div class="fields">
+        <div>
+          <label>Total songs</label>
+          <input type="number" id="total-songs" min="1">
+        </div>
+        <div>
+          <label>Mix pattern (P = podcast, M = music)</label>
+          <input type="text" id="mix-pattern">
+        </div>
+    </div>
+      <label>Genres</label>
+      <div id="genres"></div>
+      <div class="row">
+        <input type="text" id="genre-input" placeholder="Add a genre, e.g. indie pop">
+        <button id="add-genre">Add</button>
+      </div>
+      <div class="node-log">
+        <h2>Node log</h2>
+        <pre id="node-log-output">Waiting for server logs…</pre>
+      </div>
+    </section>
+
+    <section class="panel podcasts">
+      <h2>Podcasts</h2>
+      <div id="podcasts"></div>
+      <button id="add-podcast">Add podcast</button>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let state = { podcasts: [], genres: [], total_songs: 15, mix_pattern: "PMMM" };
+
+    function setStatus(msg, err) {
+      $("status").textContent = msg || "";
+      $("status").className = "status" + (err ? " err" : "");
+    }
+
+    function podcastRow(p, i) {
+      return `<div class="podcast" data-i="${i}">
+        <label>Name</label>
+        <input type="text" data-f="name" value="${esc(p.name)}">
+        <label>Show URL or ID</label>
+        <input type="text" data-f="id" value="${esc(p.id)}">
+        <div class="fields">
+          <div><label>Episodes</label><input type="number" min="1" data-f="episodes" value="${p.episodes || 1}"></div>
+          <div>
+            <label>Mode</label>
+            <select data-f="mode">
+              <option value="newest"${!['newest_unplayed', 'oldest_unplayed'].includes(p.mode) ? " selected" : ""}>Newest</option>
+              <option value="newest_unplayed"${p.mode === "newest_unplayed" ? " selected" : ""}>Newest unplayed</option>
+              <option value="oldest_unplayed"${p.mode === "oldest_unplayed" ? " selected" : ""}>Oldest unplayed</option>
+            </select>
+          </div>
+          <div><label>Scan limit (max episodes)</label><input type="number" min="1" data-f="scan_limit" value="${p.scan_limit || 50}"></div>
+          <div>
+            <label>Pin first</label>
+            <input type="checkbox" data-f="position"${p.position === "first" ? " checked" : ""}>
+          </div>
+        </div>
+        <button class="danger" data-remove="${i}">Remove</button>
+      </div>`;
+    }
+
+    function esc(s) {
+      return String(s || "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function renderSettings() {
+      $("podcasts").innerHTML = state.podcasts.map(podcastRow).join("");
+      $("total-songs").value = state.total_songs;
+      $("mix-pattern").value = state.mix_pattern;
+      $("genres").innerHTML = state.genres.map((g, i) =>
+        `<span class="chip">${esc(g)} <button type="button" data-del-genre="${i}" aria-label="Remove">×</button></span>`
+      ).join("");
+    }
+
+    function readSettingsFromDom() {
+      state.podcasts = [...document.querySelectorAll(".podcast")].map((el) => ({
+        name: el.querySelector('[data-f="name"]').value,
+        id: el.querySelector('[data-f="id"]').value,
+        episodes: el.querySelector('[data-f="episodes"]').value,
+        mode: el.querySelector('[data-f="mode"]').value,
+        scan_limit: el.querySelector('[data-f="scan_limit"]').value,
+        position: el.querySelector('[data-f="position"]').checked ? "first" : "",
+      }));
+      state.total_songs = $("total-songs").value;
+      state.mix_pattern = $("mix-pattern").value;
+    }
+
+    function renderPlaylist(items) {
+      if (!items.length) {
+        $("playlist").innerHTML = "<p class='sub'>Playlist is empty.</p>";
+        return;
+      }
+      $("playlist").innerHTML = items.map((item) => `
+        <div class="item">
+          ${item.image ? `<img src="${esc(item.image)}" alt="">` : `<div class="ph"></div>`}
+          <div>
+            <div class="name">${esc(item.name)}</div>
+            <div class="sub">${esc(item.subtitle)}</div>
+          </div>
+          <div class="badge">${item.type === "episode" ? "Podcast" : "Song"}</div>
+        </div>`).join("");
+    }
+
+    async function loadConfig() {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load config");
+      state = data;
+      renderSettings();
+    }
+
+    async function loadPlaylist() {
+      const res = await fetch("/api/playlist");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load playlist");
+      renderPlaylist(data.items || []);
+    }
+
+    async function loadNodeLog() {
+      try {
+        const res = await fetch("/api/log");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to load Node log");
+        const output = $("node-log-output");
+        output.textContent = data.lines?.join("\n") || "No Node log entries yet.";
+        output.scrollTop = output.scrollHeight;
+      } catch (err) {
+        $("node-log-output").textContent = err.message;
+      }
+    }
+
+    $("add-podcast").onclick = () => {
+      readSettingsFromDom();
+      state.podcasts.push({ name: "", id: "", episodes: 1, mode: "newest", position: "", scan_limit: 50 });
+      renderSettings();
+    };
+
+    $("podcasts").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove]");
+      if (!btn) return;
+      readSettingsFromDom();
+      state.podcasts.splice(Number(btn.dataset.remove), 1);
+      renderSettings();
+    });
+
+    $("add-genre").onclick = () => {
+      readSettingsFromDom();
+      const g = $("genre-input").value.trim();
+      if (!g) return;
+      if (!state.genres.includes(g)) state.genres.push(g);
+      $("genre-input").value = "";
+      renderSettings();
+    };
+
+    $("genre-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); $("add-genre").click(); }
+    });
+
+    $("genres").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-del-genre]");
+      if (!btn) return;
+      readSettingsFromDom();
+      state.genres.splice(Number(btn.dataset.delGenre), 1);
+      renderSettings();
+    });
+
+    $("save").onclick = async () => {
+      try {
+        readSettingsFromDom();
+        setStatus("Saving…");
+        const res = await fetch("/api/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(state),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Save failed");
+        state = data;
+        renderSettings();
+        setStatus("Settings saved.");
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    };
+
+    $("refresh").onclick = async () => {
+      try {
+        $("refresh").disabled = true;
+        setStatus("Refreshing playlist… this can take a minute.");
+        const res = await fetch("/api/refresh", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Refresh failed");
+        await loadNodeLog();
+        await loadPlaylist();
+        setStatus(data.skipped ? "No new episodes; playlist unchanged." : "Playlist refreshed.");
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        $("refresh").disabled = false;
+      }
+    };
+
+    $("dry-run").onclick = async () => {
+      try {
+        readSettingsFromDom();
+        $("dry-run").disabled = true;
+        setStatus("Building a dry-run preview… this can take a minute.");
+        const res = await fetch("/api/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dryRun: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Dry run failed");
+        await loadNodeLog();
+        setStatus("Dry run complete. Nothing was changed in Spotify.");
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        $("dry-run").disabled = false;
+      }
+    };
+
+    $("gemini-refresh").onclick = async () => {
+      try {
+        $("gemini-refresh").disabled = true;
+        setStatus("Asking Gemini to refresh your genres…");
+        const res = await fetch("/api/gemini-refresh", { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Gemini refresh failed");
+        await loadNodeLog();
+        await loadConfig();
+        setStatus("Genres refreshed with Gemini and saved to config.yaml.");
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        $("gemini-refresh").disabled = false;
+      }
+    };
+
+    (async () => {
+      try {
+        await loadConfig();
+        await loadPlaylist();
+        await loadNodeLog();
+        setInterval(loadNodeLog, 2000);
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    })();
+  </script>
+</body>
+</html>

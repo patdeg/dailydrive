@@ -190,6 +190,43 @@ podcasts:
     position: first    # Always plays first, before the pattern
 ```
 
+### Choose which podcast episodes to select
+
+Each podcast can use one of three selection modes:
+
+| Mode | Behavior |
+|------|----------|
+| `newest` | Selects the latest episode(s), whether played or not |
+| `newest_unplayed` | Selects the most recent unplayed episode(s), falling back to the latest episode(s) if everything scanned is played |
+| `oldest_unplayed` | Selects the oldest unplayed episode(s) found in the scan |
+
+```yaml
+podcasts:
+  - name: "Freakonomics Radio"
+    id: "6z4NLXyHPga1UmSJsPK7G1"
+    episodes: 1
+    mode: "newest_unplayed"
+    scan_limit: 50
+```
+
+`scan_limit` is the maximum number of episodes to inspect for the unplayed modes. Spotify returns episodes newest first in batches of up to 50. `newest_unplayed` stops as soon as it has enough unplayed episodes, reducing API requests when a recent episode is available. `oldest_unplayed` may scan additional batches because it must search farther back for the oldest match.
+
+### Use the web GUI
+
+Start the local GUI with:
+
+```bash
+npm run gui
+```
+
+Then open `http://127.0.0.1:3000`. On desktop, the interface separates the playlist, music settings, and podcast settings into three panels. It also includes:
+
+- **Dry run** — builds and prints a playlist preview without changing Spotify
+- **Refresh with Gemini** — regenerates genre suggestions using `GEMINI_API_KEY` and saves them to `config.yaml`
+- **Node log** — shows recent server and playlist-build output below Music settings
+
+The GUI is intended for local or trusted LAN use. Do not expose it directly to the public internet because it has no login.
+
 ---
 
 ## Run It Automatically
@@ -217,6 +254,7 @@ That's it — your Daily Drive is back on autopilot.
 | `npm run setup` | Log in to Spotify (one time, or if token expires) |
 | `npm start` | Build/refresh the playlist now |
 | `npm test` | Dry run — shows what would happen without changing anything |
+| `npm run gui` | Start the local web GUI on port 3000 |
 | `npm run taste` | Auto-detect your music genres using AI (Demeterics) |
 | `npm run taste:google` | Auto-detect your music genres using AI (Google Gemini — free) |
 
@@ -282,7 +320,7 @@ Uses the [Demeterics](https://demeterics.ai) API — an LLM observability platfo
 ## How It Works
 
 1. **Auth:** OAuth 2.0 — `setup.js` runs a local server, you log in via browser, tokens are saved and auto-refresh
-2. **Podcasts:** Fetches latest episodes from each show via Spotify API
+2. **Podcasts:** Fetches latest or unplayed episodes from each show via Spotify API, stopping early for `newest_unplayed` when enough candidates are found
 3. **Music:** Pulls from your top tracks, genre search, and/or playlists — pools, shuffles, and trims
 4. **Mix:** Pins episodes marked `position: first`, then interleaves the rest using your mix pattern
 5. **Update:** Replaces the playlist contents via the Spotify API

@@ -59,6 +59,7 @@ const SCOPES = [
   "user-read-private",
   "user-read-recently-played",
   "user-top-read",
+  "user-read-playback-position",
 ];
 
 // --- Start a tiny web server to catch the callback ---

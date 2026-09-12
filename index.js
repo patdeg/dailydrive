@@ -37,8 +37,7 @@ const PODCAST_ONLY = process.argv.includes("--podcast-only"); // Hourly mode: on
  */
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
-    console.error("❌ config.yaml not found! Run: cp config.example.yaml config.yaml");
-    process.exit(1);
+    throw new Error("config.yaml not found! Run: cp config.example.yaml config.yaml");
   }
   return yaml.load(fs.readFileSync(CONFIG_FILE, "utf8"));
 }
@@ -49,8 +48,7 @@ function loadConfig() {
  */
 function loadToken() {
   if (!fs.existsSync(TOKEN_FILE)) {
-    console.error("❌ Not authenticated! Run: npm run setup");
-    process.exit(1);
+    throw new Error("Not authenticated! Run: npm run setup");
   }
   return JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8"));
 }
@@ -96,6 +94,50 @@ function shuffle(array) {
 }
 
 /**
+ * Removes duplicate items from an array based on their URI.
+ * Keeps the first occurrence of each URI; subsequent occurrences are removed.
+ *
+ * This prevents the same song or episode from appearing multiple times in the
+ * playlist when it's fetched from different sources (e.g., top tracks + playlists,
+ * or familiar music + genre discovery).
+ *
+ * @param {Array} items - Array of objects with a `uri` property
+ * @param {string} label - Optional label for logging (e.g., "tracks", "episodes")
+ * @returns {Array} - Deduplicated array with logging output
+ */
+function removeDuplicates(items, label = "items") {
+  const seen = new Set();
+  const deduplicated = [];
+  let duplicateCount = 0;
+
+  for (const item of items) {
+    const dedupeKey = item.type === "track" && item.isrc ? item.isrc : item.uri;
+
+    if (!dedupeKey) {
+      // Items without a usable dedupe key are kept (shouldn't happen, but be safe)
+      deduplicated.push(item);
+      continue;
+    }
+
+    if (seen.has(dedupeKey)) {
+      duplicateCount++;
+      console.log(
+        `    ⏭️  Skipping duplicate: ${item.name} (${item.type === "episode" ? item.show : item.artist})`
+      );
+    } else {
+      seen.add(dedupeKey);
+      deduplicated.push(item);
+    }
+  }
+
+  if (duplicateCount > 0) {
+    console.log(`    🔄 Removed ${duplicateCount} duplicate ${label}`);
+  }
+
+  return deduplicated;
+}
+
+/**
  * Spotify access tokens expire after 1 hour. This function checks if the token
  * is about to expire (within 5 minutes) and refreshes it automatically using
  * the long-lived refresh token. You don't need to re-authenticate manually.
@@ -126,40 +168,116 @@ async function refreshTokenIfNeeded(spotifyApi, token) {
 // =============================================================================
 
 /**
- * Fetches the latest episodes for each podcast listed in your config.
- * Returns an array of episode objects with uri, name, show name, and position.
+ * Fetches podcast episodes based on the configured mode per podcast:
+ *   - "newest" (default): grabs the most recent episode(s)
+ *   - "newest_unplayed": scans recent episodes and picks the most recent
+ *     episode(s) that Spotify hasn't marked as fully played
+ *   - "oldest_unplayed": scans recent episodes and picks the oldest one
+ *     that Spotify hasn't marked as fully played yet
  *
- * Note: Some podcasts (like NPR News Now) publish hourly episodes that expire
- * quickly on Spotify. If you see "[unavailable]" in your playlist, run the
- * script again to fetch the latest episode.
+ * The unplayed modes use Spotify's resume_point.fully_played field, which is
+ * returned when the market parameter is set. They scan up to scan_limit
+ * episodes (default: 50) and select from the newest or oldest end. The
+ * newest-unplayed mode stops as soon as it has enough candidates.
+ *
+ * Falls back to newest if no unplayed episodes are found.
  */
-async function fetchPodcastEpisodes(spotifyApi, podcasts) {
+async function fetchPodcastEpisodes(spotifyApi, podcasts, market) {
   const episodes = [];
 
   for (const podcast of podcasts) {
-    // How many recent episodes to grab (default: 1, configurable per podcast)
     const count = podcast.episodes || 1;
-    console.log(`🎙️  Fetching ${count} episode(s) from: ${podcast.name}`);
+    const mode = podcast.mode || "newest";
+
+    console.log(`🎙️  Fetching ${count} episode(s) from: ${podcast.name} (mode: ${mode})`);
 
     try {
-      // Ask Spotify for the most recent episodes of this show
-      const data = await spotifyApi.getShowEpisodes(podcast.id, {
-        limit: count,
-        market: "US", // Required for episode availability
-      });
+      if (mode === "oldest_unplayed" || mode === "newest_unplayed") {
+        // Scan through episodes in batches of 50 (Spotify API max per request)
+        const scanLimit = podcast.scan_limit || 50;
+        const batchSize = 50;
+        let offset = 0;
+        let scanned = 0;
+        const unplayed = [];
+        let newestItems = [];
 
-      for (const episode of data.body.items) {
-        episodes.push({
-          uri: episode.uri,      // Spotify URI like "spotify:episode:abc123"
-          name: episode.name,
-          show: podcast.name,
-          type: "episode",
-          position: podcast.position || null, // "first" = pinned to top of playlist
+        while (scanned < scanLimit) {
+          const limit = Math.min(batchSize, scanLimit - scanned);
+          const data = await spotifyApi.getShowEpisodes(podcast.id, {
+            limit,
+            offset,
+            market: market || "US",
+          });
+
+          const items = data.body.items;
+          if (items.length === 0) break; // No more episodes
+          if (scanned === 0) newestItems = items;
+
+          for (const ep of items) {
+            const status = ep.resume_point?.fully_played ? "✅ played" : "⬜ unplayed";
+            console.log(`    ${status}  ${ep.name}`);
+
+            if (!ep.resume_point?.fully_played) {
+              unplayed.push(ep);
+            }
+          }
+
+          scanned += items.length;
+          offset += items.length;
+
+          // Spotify returns newest first, so more pages cannot improve this
+          // result once newest-unplayed has enough episodes.
+          if (mode === "newest_unplayed" && unplayed.length >= count) break;
+
+          // If we got fewer than requested, we've reached the end
+          if (items.length < limit) break;
+
+          console.log(`    📊 Scanned ${scanned}/${scanLimit} episodes, ${unplayed.length} unplayed so far...`);
+        }
+
+        console.log(`    📊 Scan complete: ${scanned} episodes scanned, ${unplayed.length} unplayed found`);
+
+        // Spotify returns newest first. Reverse only for oldest-unplayed mode.
+        if (mode === "oldest_unplayed") unplayed.reverse();
+
+        let selected;
+        if (unplayed.length === 0) {
+          console.log(`    ℹ️  No unplayed episodes found — falling back to newest`);
+          // The first scan already contains the newest episodes.
+          selected = newestItems.slice(0, count);
+        } else {
+          selected = unplayed.slice(0, count);
+        }
+
+        for (const episode of selected) {
+          episodes.push({
+            uri: episode.uri,
+            name: episode.name,
+            show: podcast.name,
+            type: "episode",
+            position: podcast.position || null,
+          });
+          console.log(`    📌 Selected: ${episode.name}`);
+        }
+      } else {
+        // Default "newest" mode — original behavior
+        const data = await spotifyApi.getShowEpisodes(podcast.id, {
+          limit: count,
+          market: market || "US",
         });
-        console.log(`    📌 ${episode.name}`);
+
+        for (const episode of data.body.items) {
+          episodes.push({
+            uri: episode.uri,
+            name: episode.name,
+            show: podcast.name,
+            type: "episode",
+            position: podcast.position || null,
+          });
+          console.log(`    📌 ${episode.name}`);
+        }
       }
     } catch (err) {
-      // Don't crash if one podcast fails — just warn and continue with the rest
       console.error(`    ⚠️  Failed to fetch ${podcast.name}: ${err.message}`);
     }
   }
@@ -174,7 +292,7 @@ async function fetchPodcastEpisodes(spotifyApi, podcasts) {
  *
  * Tracks are shuffled and trimmed to the requested count.
  */
-async function fetchMusicTracks(spotifyApi, musicConfig) {
+async function fetchMusicTracks(spotifyApi, musicConfig, market) {
   let allTracks = [];
 
   // --- Source 1: Pull tracks from user-specified playlists ---
@@ -276,6 +394,9 @@ async function fetchMusicTracks(spotifyApi, musicConfig) {
     }
   }
 
+  // Remove duplicate tracks before shuffling and trimming
+  allTracks = removeDuplicates(allTracks, "tracks");
+
   // Shuffle and trim to the desired total number of songs
   const totalSongs = musicConfig.total_songs || 15;
   if (musicConfig.shuffle !== false) {
@@ -294,7 +415,7 @@ async function fetchMusicTracks(spotifyApi, musicConfig) {
  *
  * Tracks are split evenly across genres, then shuffled and trimmed.
  */
-async function fetchGenreTracks(spotifyApi, genres, count) {
+async function fetchGenreTracks(spotifyApi, genres, count, market) {
   const tracks = [];
   // Divide the target count evenly among configured genres
   const perGenre = Math.ceil(count / genres.length);
@@ -305,7 +426,7 @@ async function fetchGenreTracks(spotifyApi, genres, count) {
       // Use Spotify's search with a "genre:" filter
       const data = await spotifyApi.searchTracks(`genre:${genre}`, {
         limit: Math.min(perGenre, 10), // Spotify Dev Mode caps search at 10 results per query
-        market: "US",
+        market: market || "US", // Use configured market or default to US
       });
 
       for (const track of data.body.tracks.items) {
@@ -389,11 +510,11 @@ function mixContent(episodes, tracks, pattern) {
  * PUT replaces the first 100 items; POST appends additional batches if needed.
  * This endpoint accepts both track and episode URIs.
  */
-async function updatePlaylist(spotifyApi, playlistId, items) {
+async function updatePlaylist(spotifyApi, playlistId, items, mode, dryRun = DRY_RUN) {
   const uris = items.map((item) => item.uri);
 
   // In dry-run mode, just print what would happen and return
-  if (DRY_RUN) {
+  if (dryRun) {
     console.log("\n🧪 DRY RUN — would update playlist with:\n");
     items.forEach((item, i) => {
       const icon = item.type === "episode" ? "🎙️ " : "🎵";
@@ -436,84 +557,98 @@ async function updatePlaylist(spotifyApi, playlistId, items) {
   }
 
   console.log(`\n✅ Playlist updated with ${items.length} items!`);
-  console.log(`   🎙️  ${items.filter((i) => i.type === "episode").length} podcast episodes`);
-  console.log(`   🎵 ${items.filter((i) => i.type === "track").length} songs\n`);
+  const episodeCount = items.filter((i) => i.type === "episode").length;
+  const trackCount = items.filter((i) => i.type === "track").length;
+  console.log(`   🎙️  ${episodeCount} podcast episodes`);
+  console.log(`   🎵 ${trackCount} songs\n`);
+
+  const now = new Date();
+  const updatedAt = now.toISOString().replace("T", " ").split(".")[0] + " UTC";
+  const modeLabel = mode === "podcast-only" ? "hourly podcast refresh" : "full refresh";
+  const description = `Daily Drive updated: ${trackCount} songs, ${episodeCount} episodes, ${modeLabel}. Last updated ${updatedAt}.`;
+
+  await setPlaylistDescription(spotifyApi, playlistId, description);
+  console.log("📝 Playlist description updated.");
+}
+
+/**
+ * Updates the Spotify playlist description with a short debug summary.
+ */
+async function setPlaylistDescription(spotifyApi, playlistId, description) {
+  const accessToken = spotifyApi.getAccessToken();
+  const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ description }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Failed to update playlist description: ${res.status} ${err}`);
+  }
 }
 
 // =============================================================================
 // Main — Entry point that orchestrates everything
 // =============================================================================
 
-async function main() {
-  const mode = PODCAST_ONLY ? "podcast-only" : "full";
-  console.log(`\n🚗 Daily Drive — ${PODCAST_ONLY ? "Hourly podcast refresh" : "Full playlist rebuild"}...\n`);
-
-  // Step 1: Load configuration and authentication token
+async function getAuthenticatedApi() {
   const config = loadConfig();
   const token = loadToken();
-
-  // Step 2: Create Spotify API client with your app credentials
   const spotifyApi = new SpotifyWebApi({
     clientId: config.spotify.client_id,
     clientSecret: config.spotify.client_secret,
     redirectUri: config.spotify.redirect_uri,
   });
-
-  // Set the tokens so the API client can make authenticated requests
   spotifyApi.setAccessToken(token.access_token);
   spotifyApi.setRefreshToken(token.refresh_token);
-
-  // Step 3: Refresh the access token if it's about to expire
   await refreshTokenIfNeeded(spotifyApi, token);
+  return { spotifyApi, config, token };
+}
 
-  // Step 4: Make sure the user has set a real playlist ID
+async function runBuild({ podcastOnly = false, dryRun = DRY_RUN } = {}) {
+  const mode = podcastOnly ? "podcast-only" : "full";
+  const runTime = new Date().toISOString().replace("T", " ").split(".")[0] + " UTC";
+  console.log(`\n🚗 Daily Drive — ${podcastOnly ? "Hourly podcast refresh" : "Full playlist rebuild"}...`);
+  console.log(`   🕒 Run started: ${runTime}\n`);
+
+  const { spotifyApi, config } = await getAuthenticatedApi();
+
   if (!config.playlist_id || config.playlist_id === "your-playlist-id-here") {
-    console.error("❌ Please set your playlist_id in config.yaml");
-    process.exit(1);
+    throw new Error("Please set your playlist_id in config.yaml");
   }
 
-  // Step 5: Fetch the latest podcast episodes
-  const episodes = await fetchPodcastEpisodes(spotifyApi, config.podcasts || []);
+  const episodes = await fetchPodcastEpisodes(spotifyApi, config.podcasts || [], config.spotify.market);
 
-  // Step 6: Check if episodes have changed since last run
-  // This prevents unnecessary playlist updates that would reset your listening position
   const state = loadState();
   const currentEpisodeUris = episodes.map((e) => e.uri).sort().join(",");
   const previousEpisodeUris = state.episode_uris || "";
 
-  // In podcast-only mode, skip if episodes haven't changed (no point reshuffling)
-  // In full refresh mode, ALWAYS proceed — we want fresh music even if podcasts are the same
-  if (!DRY_RUN && PODCAST_ONLY && currentEpisodeUris === previousEpisodeUris && episodes.length > 0) {
+  if (!dryRun && podcastOnly && currentEpisodeUris === previousEpisodeUris && episodes.length > 0) {
     console.log("\n⏭️  No new podcast episodes detected. Playlist unchanged.");
     console.log("   (Same episodes as last update — skipping to avoid disruption)\n");
-    process.exit(0);
+    return { skipped: true, last_updated: state.last_updated || null };
   }
 
-  // Step 7: Get music tracks
   let tracks;
 
-  if (PODCAST_ONLY) {
-    // --- Podcast-only mode (hourly) ---
-    // Reuse the music tracks saved from the last full refresh.
-    // This keeps your music stable all day while swapping in fresh podcast episodes.
+  if (podcastOnly) {
     if (state.music_tracks && state.music_tracks.length > 0) {
       tracks = state.music_tracks;
       console.log(`🎵 Reusing ${tracks.length} saved music tracks from last full refresh`);
     } else {
-      // No saved music — fall back to a full music fetch
-      // This happens on the very first run, or if state.json was deleted
       console.log("⚠️  No saved music tracks found — falling back to full music fetch");
       tracks = await fetchAllMusicTracks(spotifyApi, config);
     }
   } else {
-    // --- Full refresh mode (daily) ---
-    // Fetch fresh music from all sources (top tracks, playlists, genre discovery)
     tracks = await fetchAllMusicTracks(spotifyApi, config);
   }
 
   if (episodes.length === 0 && tracks.length === 0) {
-    console.error("❌ No content found! Check your config.yaml settings.");
-    process.exit(1);
+    throw new Error("No content found! Check your config.yaml settings.");
   }
 
   // Step 8: Separate pinned episodes (position: "first") from mixable ones
@@ -532,28 +667,45 @@ async function main() {
   console.log(`\n🔀 Mixing with pattern: ${config.mix_pattern || "PMMM"}`);
   const mixed = [...pinnedFirst, ...mixContent(mixableEpisodes, tracks, config.mix_pattern)];
 
-  // Step 10: Push the final mixed playlist to Spotify
-  await updatePlaylist(spotifyApi, config.playlist_id, mixed);
+  // Step 9a: Final deduplication pass (safety net)
+  // This catches any duplicates that might have appeared during mixing
+  const finalMixed = removeDuplicates(mixed, "playlist items");
 
-  // Step 11: Save state so the next run can detect if episodes have changed
-  if (!DRY_RUN) {
+  // Step 10: Push the final mixed playlist to Spotify
+  await updatePlaylist(spotifyApi, config.playlist_id, finalMixed, mode, dryRun);
+
+  // Step 11: Save state with detailed item metadata for debugging
+  if (!dryRun) {
     const newState = {
       episode_uris: currentEpisodeUris,
       last_updated: new Date().toISOString(),
     };
 
-    if (PODCAST_ONLY) {
-      // In podcast-only mode, preserve the saved music tracks from the full refresh
+    if (podcastOnly) {
       newState.music_tracks = state.music_tracks || tracks;
       newState.last_full_refresh = state.last_full_refresh || null;
     } else {
-      // In full refresh mode, save the music tracks for hourly podcast-only runs to reuse
       newState.music_tracks = tracks;
       newState.last_full_refresh = new Date().toISOString();
     }
 
     saveState(newState);
     console.log("💾 State saved to state.json");
+  }
+
+  return { ok: true, skipped: false, last_updated: new Date().toISOString(), count: finalMixed.length };
+}
+
+async function main() {
+  try {
+    const result = await runBuild({ podcastOnly: PODCAST_ONLY });
+    if (result.skipped) process.exit(0);
+  } catch (err) {
+    console.error("\n❌ Error:", err.message);
+    if (err.statusCode === 401) {
+      console.error("   Your token may have expired. Run: npm run setup\n");
+    }
+    process.exit(1);
   }
 }
 
@@ -564,6 +716,7 @@ async function main() {
  */
 async function fetchAllMusicTracks(spotifyApi, config) {
   const musicConfig = config.music || {};
+  const market = config.spotify?.market || "US";
   const totalSongs = musicConfig.total_songs || 15;
   const hasGenres = musicConfig.genres && musicConfig.genres.length > 0;
 
@@ -575,27 +728,37 @@ async function fetchAllMusicTracks(spotifyApi, config) {
 
   // Fetch familiar tracks (your top tracks + any source playlists)
   const familiarConfig = { ...musicConfig, total_songs: familiarCount };
-  let tracks = await fetchMusicTracks(spotifyApi, familiarConfig);
+  let tracks = await fetchMusicTracks(spotifyApi, familiarConfig, market);
 
   // Fetch discovery tracks (genre-based search for new music)
   if (hasGenres && discoveryCount > 0) {
-    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, discoveryCount);
+    const genreTracks = await fetchGenreTracks(spotifyApi, musicConfig.genres, discoveryCount, market);
 
     // Remove any genre tracks that duplicate songs already in the familiar set
     const familiarUris = new Set(tracks.map((t) => t.uri));
-    const newGenreTracks = genreTracks.filter((t) => !familiarUris.has(t.uri));
-    tracks = [...tracks, ...newGenreTracks.slice(0, discoveryCount)];
-    console.log(`🎵 Music mix: ${familiarCount} familiar + ${newGenreTracks.slice(0, discoveryCount).length} discovery = ${tracks.length} total`);
+    const uniqueGenreTracks = genreTracks.filter((t) => !familiarUris.has(t.uri));
+    
+    // Log deduplication result
+    if (uniqueGenreTracks.length < genreTracks.length) {
+      const deduped = genreTracks.length - uniqueGenreTracks.length;
+      console.log(`    🔄 Removed ${deduped} duplicate genre track(s) already in familiar music`);
+    }
+    
+    tracks = [...tracks, ...uniqueGenreTracks.slice(0, discoveryCount)];
+    console.log(`🎵 Music mix: ${familiarCount} familiar + ${uniqueGenreTracks.slice(0, discoveryCount).length} discovery = ${tracks.length} total`);
   }
 
   return tracks;
 }
 
-// Run the main function and handle any uncaught errors
-main().catch((err) => {
-  console.error("\n❌ Error:", err.message);
-  if (err.statusCode === 401) {
-    console.error("   Your token may have expired. Run: npm run setup\n");
-  }
-  process.exit(1);
-});
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  loadConfig,
+  loadToken,
+  getAuthenticatedApi,
+  fetchPodcastEpisodes,
+  runBuild,
+};
