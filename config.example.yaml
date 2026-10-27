@@ -2,8 +2,8 @@
 # Daily Drive Configuration
 # =============================================================================
 # Copy this file to config.yaml and fill in your details:
-#   cp config.example.yaml config.yaml
-#
+# cp config.example.yaml config.yaml
+
 # For help getting your Spotify credentials, see README.md
 # =============================================================================
 
@@ -28,8 +28,14 @@ playlist_id: "your-playlist-id-here"
 # To find a show ID: open it in Spotify > Share > Copy link
 # Example: https://open.spotify.com/show/6z4NLXyHPga... → ID is "6z4NLXyHPga..."
 #
+# Podcast selection modes:
+#   newest                 Always use the newest episode.
+#   oldest_unplayed        Scan recent episodes and use the oldest unfinished one.
+#   alternate_if_finished  Use the newest episode unless it is finished, then
+#                          try the newest unfinished episode from each alternate.
+#
 # Use position: first to always place a podcast at the start of the playlist
-# (great for news briefings like NPR News Now)
+# (great for news briefings like NPR News Now).
 podcasts:
   # Optional: Daily welcome greeting for your playlist.
   # A short "Welcome to Your Daily Drive, it's Monday March 24th..." intro.
@@ -39,50 +45,96 @@ podcasts:
   #   episodes: 1
   #   position: first
 
-  - name: "NPR News Now"
-    id: "6BRSvIBNQnB68GuoXJRCnQ"
+  - name: "NU.nl nieuws"
+    id: "2EaVmyxrGQv0au2jjHki5v"
     episodes: 1
     position: first         # Always plays first, before the mix pattern
+    mode: "newest"
 
-  - name: "Freakonomics Radio"
-    id: "6z4NLXyHPga1UmSJsPK7G1"
+  - name: "Techlinked"
+    id: "1cBhYjm2fildfRsNDEYLcm"
+    episodes: 1
+    mode: "alternate_if_finished"
+    alternates:
+      - name: "Tech Update | BNR"
+        id: "6kCnBozPT8JCiPgLHmyc6b"
+
+  - name: "IGN Game & Entertainment news"
+    id: "14c7lvFpnxXgHiJzo7pFff"
+    episodes: 1
+    mode: "alternate_if_finished"
+    alternates:
+      - name: "De Universiteit van Nederland Podcast"
+        id: "0z2ydI7p9BA6wxFiq8U0lF"
+
+  - name: "NRC Vandaag"
+    id: "73vZPMVjxTqC02OYZdcCr7"
     episodes: 1
 
-  - name: "The Daily"
-    id: "3IM0lmZxpFAY7CwMuv9H4g"
+  - name: "Lang verhaal kort"
+    id: "3Ab6DGFJL7VE5ToIH4r6w1"
     episodes: 1
 
 # --- Music Sources ---
 # Where to pull songs from. You can mix and match multiple sources.
-# All sources are pooled together, shuffled, and trimmed to total_songs.
+#
+# The relative share of each source is controlled by share_pattern:
+#   "top-playlists-genres"
+#
+# Example: "35-35-30" means:
+#   35% top tracks
+#   35% playlist tracks
+#   30% genre discovery
+#
+# Shares are normalized to 100%, so "40-40-40" becomes approximately
+# "33-33-33". Genre discovery receives any rounding remainder so the final
+# total still matches total_songs.
+#
+# Duplicate tracks are removed from the combined pool before the final shuffle.
 music:
   # Top tracks — pulls from your most-played songs
   # Best signal for "songs I actually enjoy and don't skip"
   top_tracks:
     enabled: true
-    time_range: "short_term"   # short_term (~4 weeks), medium_term (~6 months), long_term (all time)
-    count: 30                  # fetch pool size (shuffled + trimmed to total_songs)
+    time_range: "short_term" # short_term (~4 weeks), medium_term (~6 months), long_term (all time)
+    count: 30 # fetch pool size (shuffled + trimmed to its configured share)
 
   # Genre-based music discovery (optional)
   # Finds fresh tracks by genre via Spotify search
-  # genres:
-  #   - pop
-  #   - edm
-  #   - pop rock
-  #   - indie pop
-  #   - dance pop
+  genres:
+    - pop
+    - edm
+    - pop rock
+    - indie pop
+    - dance pop
 
   # Pull songs from existing playlists (optional)
-  # Find playlist IDs the same way as your target playlist above
-  # playlists:
-  #   - name: "Your Favorite Playlist"
-  #     id: "your-playlist-id"
+  # Find playlist IDs the same way as your target playlist above.
+  #
+  # Use a playlist you own, such as a weekly "Discovery Pool" playlist.
+  # Spotify-owned algorithmic playlists such as Discover Weekly may return
+  # HTTP 404 through the playlist-items API.
+  #
+  # Replace the contents of this playlist each week with fresh Discover Weekly
+  # songs to keep this source current.
+  playlists:
+    - name: "Your Discovery Pool"
+      id: "your-playlist-id"
+
+  # Relative share of each music source: "top-playlists-genres"
+  # Examples:
+  #   "35-35-30" → balanced mix of familiar songs, playlist tracks, and discovery
+  #   "45-20-35" → fewer playlist tracks, more genre discovery
+  #   "50-0-50"  → no playlist tracks
+  share_pattern: "35-35-30"
 
   # How many songs to include total
   # (The original Daily Drive had ~19 songs and ~5 podcast segments)
   total_songs: 19
 
-  # Shuffle the songs? (true/false)
+  # Shuffle the final combined music pool? (true/false)
+  # Shuffling happens after tracks are collected from all enabled sources and
+  # after duplicates are removed.
   shuffle: true
 
 # --- Mix Pattern ---
@@ -90,12 +142,12 @@ music:
 # P = podcast episode, M = music track
 # The pattern repeats until all content is placed.
 # Pinned episodes (position: first) appear before the pattern starts.
-#
+
 # Examples:
-#   "PMMM"     → 1 podcast, 3 songs, 1 podcast, 3 songs...
-#   "PMMMM"    → 1 podcast, 4 songs, repeat...
-#   "PMMPMMM"  → 1 podcast, 2 songs, 1 podcast, 3 songs...
-#   "PM"       → alternating podcast and song
+# "PMMM" → 1 podcast, 3 songs, 1 podcast, 3 songs...
+# "PMMMM" → 1 podcast, 4 songs, repeat...
+# "PMMPMMM" → 1 podcast, 2 songs, 1 podcast, 3 songs...
+# "PM" → alternating podcast and song
 mix_pattern: "PMMMM"
 
 # --- Schedule ---
@@ -104,6 +156,6 @@ mix_pattern: "PMMMM"
 # evening refreshes for the commute home
 schedule:
   times:
-    - "04:00"            # Morning: captures overnight podcast drops
-    - "16:00"            # Evening: refreshes for the commute home
+    - "04:00" # Morning: captures overnight podcast drops
+    - "16:00" # Evening: refreshes for the commute home
   timezone: "America/New_York"
